@@ -5,6 +5,7 @@
 var M = null, SST = null, CLIM = null, SER = null, MON = null, QC = null;
 var ND = 0, NC = 0, NLON = 0, NLAT = 0, SCALE = 0.15, NODATA = 255;
 var NLEG = 0;   // 前段 (-2~30 色階世代) 日數，索引 0..NLEG-1
+var LANDCV = null;   // 由原始圖檔萃取之全解析度陸地圖層
 var DOY = null, YEAR = null, MONTHI = null;
 var DAYIDX = null, SPAN = 1;   // 真實時間軸：距首日之日數
 
@@ -185,6 +186,30 @@ function polyline(g, pts, color, wd, dash) {
   g.stroke(); g.restore();
 }
 
+/* ---------- 陸地圖層 ----------
+   land_mask.png 為 0.01° 網格 (1200×1400) 之二值遮罩，直接由原始水溫圖萃取，
+   與資料共用同一組經緯度轉換，故海岸線與網格完全對齊。
+   於載入時一次性上色為「陸地填色 + 海岸線」圖層，之後每次繪圖只需 drawImage。 */
+var LAND_FILL = [52, 64, 78], LAND_COAST = [150, 176, 198];
+function buildLand(mask, w, h) {
+  var im = new ImageData(w, h), d = im.data;
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      var i = y * w + x;
+      if (mask[i] < 128) continue;                 // 海：透明
+      // 海岸線＝與海相鄰的陸地像素
+      var edge = (x === 0 || mask[i - 1] < 128) || (x === w - 1 || mask[i + 1] < 128) ||
+                 (y === 0 || mask[i - w] < 128) || (y === h - 1 || mask[i + w] < 128);
+      var c = edge ? LAND_COAST : LAND_FILL, o = i * 4;
+      d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255;
+    }
+  }
+  var cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  cv.getContext('2d').putImageData(im, 0, 0);
+  return cv;
+}
+
 /* ---------- map rendering ---------- */
 function fieldImage(getter, colf) {
   var im = new ImageData(NLON, NLAT);
@@ -218,6 +243,13 @@ function drawField(cv, getter, colf, opt) {
   g.imageSmoothingQuality = 'high';
   g.drawImage(_off, 0, 0, W, H);
 
+  // 陸地疊在水溫場之上：遮住平滑造成的越岸暈染，並給出清晰海岸線
+  if (LANDCV) {
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(LANDCV, 0, 0, W, H);
+  }
+
   // graticule
   g.save();
   g.strokeStyle = 'rgba(255,255,255,.14)'; g.lineWidth = 1;
@@ -238,6 +270,8 @@ function drawField(cv, getter, colf, opt) {
   g.restore();
 
   if (opt.iso) drawIso(g, getter, W, H, opt.isoStep || 1, opt.isoLabel);
+  g.strokeStyle = 'rgba(139,166,189,.45)'; g.lineWidth = 1;
+  g.strokeRect(0.5, 0.5, W - 1, H - 1);
   return { g: g, W: W, H: H };
 }
 /* marching squares 等溫線 */
@@ -309,9 +343,11 @@ function j(u) { return fetch(u).then(function (r) { return r.json(); }); }
 
 Promise.all([j('data/meta.json'), j('data/series.json'), j('data/monthly.json'),
   loadPNG('data/sst_cube.png'), loadPNG('data/clim_cube.png'),
-  fetch('data/qc.json').then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; })
+  fetch('data/qc.json').then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
+  loadPNG('data/land_mask.png').catch(function () { return null; })
 ]).then(function (r) {
   M = r[0]; SER = r[1]; MON = r[2]; SST = r[3].data; CLIM = r[4].data; QC = r[5];
+  if (r[6]) LANDCV = buildLand(r[6].data, r[6].w, r[6].h);
   NLON = M.grid.nlon; NLAT = M.grid.nlat; NC = NLON * NLAT;
   SCALE = M.scale; NODATA = M.nodata; ND = M.dates.length; NLEG = M.legacy_n || 0;
   DOY = new Int16Array(ND); YEAR = new Int16Array(ND); MONTHI = new Int8Array(ND);
