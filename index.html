@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>臺灣周邊海域衛星遙測海面水溫時空分布儀表板</title>
+<meta name="description" content="Taiwan Seas Satellite SST Spatiotemporal Dashboard — 由水產試驗所每日衛星海溫圖反演之 0.25° 網格海溫資料集">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230d1620'/%3E%3Cpath d='M3 21c3-4 5 3 8-1s5 3 8-1 5 3 8-1' stroke='%234fc3f7' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='16' cy='9' r='4' fill='%23ff7043'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="loading"><div class="spin"></div><div>載入資料中 Loading dataset…</div></div>
+
+<header>
+  <h1>臺灣周邊海域衛星遙測海面水溫時空分布儀表板</h1>
+  <div class="sub">Taiwan Seas Satellite Sea Surface Temperature (SST) Spatiotemporal Dashboard　·
+    資料來源 <b>農業部水產試驗所每日衛星海溫圖</b>（GHRSST MUR L4, JPL）　·
+    覆蓋 <span id="hdr-range">—</span>　·　<span id="hdr-n">—</span> 日　·　0.25° 網格</div>
+</header>
+
+<div class="tabbar">
+  <nav class="tabs">
+    <button data-p="overview" class="on">總覽 Overview</button>
+    <button data-p="map">空間分布 Spatial</button>
+    <button data-p="series">時間序列 Time Series</button>
+    <button data-p="hov">時緯剖面 Hovmöller</button>
+    <button data-p="matrix">年月距平 Anomaly Matrix</button>
+    <button data-p="mhw">海洋熱浪 Marine Heatwave</button>
+    <button data-p="method">方法與品管 Method / QC</button>
+  </nav>
+</div>
+
+<div class="wrap">
+
+<!-- ======== OVERVIEW ======== -->
+<section class="page on" id="p-overview">
+  <div class="kpis" id="kpis"></div>
+
+  <div class="card">
+    <h2>全域日均海溫與長期趨勢 <small>Domain-mean daily SST &amp; trend</small></h2>
+    <p class="note">灰線為逐日全域平均，藍線為 31 日移動平均，紅虛線為距平序列之線性趨勢（最小平方，僅取同質期間）。黃底為舊色階世代區段。</p>
+    <canvas id="ovTrend" height="300"></canvas>
+  </div>
+
+  <div class="mapgrid">
+    <div class="card" style="margin:0">
+      <h2>各海域年均距平 <small>Annual mean anomaly by region</small></h2>
+      <p class="note">相對同質基期（2019-06-03 起）之逐日氣候平均。紅＝偏暖，藍＝偏冷；淡化並標 <b>*</b> 者該年樣本少於 30 日。2018 與 2019 前段屬舊色階世代，其距平含約 +0.5 °C 的系統性差異，僅供參考。</p>
+      <div class="scroll"><table id="ovRegion"></table></div>
+    </div>
+    <div class="card" style="margin:0">
+      <h2>最新水溫場 <small>Latest field</small></h2>
+      <div id="ovMapWrap"><canvas id="ovMap"></canvas></div>
+      <div class="legend"><span id="ovMapDate" class="mono"></span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======== MAP ======== -->
+<section class="page" id="p-map">
+  <div class="card">
+    <div class="ctl">
+      <div class="seg" id="mapMode">
+        <button data-m="sst" class="on">實測 SST</button>
+        <button data-m="anom">距平 Anomaly</button>
+      </div>
+      <button class="btn" id="btnPlay">▶ 播放</button>
+      <label>速度</label>
+      <select id="spd"><option value="120">1×</option><option value="60" selected>2×</option><option value="25">5×</option><option value="10">10×</option></select>
+      <button class="btn on" id="btnIso">等溫線</button>
+      <button class="btn on" id="btnSmooth">平滑</button>
+      <span style="flex:1"></span>
+      <span class="datebig" id="mapDate">—</span>
+    </div>
+    <div class="ctl">
+      <button class="btn" id="btnPrev">◀</button>
+      <input type="range" id="dslider" min="0" max="0" value="0">
+      <button class="btn" id="btnNext">▶</button>
+      <select id="jumpYear"></select>
+    </div>
+    <div class="mapgrid">
+      <div>
+        <div id="mapwrap"><canvas id="mapcv"></canvas><div id="tip"></div></div>
+        <div class="legend"><span id="lgMin"></span><canvas id="lgcv" width="260" height="12"></canvas><span id="lgMax"></span><span id="lgUnit">°C</span></div>
+      </div>
+      <div>
+        <div class="card" style="margin:0 0 12px">
+          <h2 style="font-size:14px">當日統計 <small>Daily stats</small></h2>
+          <table id="mapStats"></table>
+        </div>
+        <div class="card" style="margin:0">
+          <h2 style="font-size:14px">格點時序 <small>Point time series</small></h2>
+          <p class="note" id="ptHint">點選地圖上任一格點查看其完整時間序列。</p>
+          <canvas id="ptCv" height="220"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======== SERIES ======== -->
+<section class="page" id="p-series">
+  <div class="card">
+    <div class="ctl">
+      <label>海域 Region</label><select id="srRegion"></select>
+      <div class="seg" id="srMode">
+        <button data-m="year" class="on">年度疊圖</button>
+        <button data-m="full">全期序列</button>
+        <button data-m="anom">距平序列</button>
+      </div>
+    </div>
+    <h2 id="srTitle">—</h2>
+    <p class="note" id="srNote"></p>
+    <canvas id="srCv" height="380"></canvas>
+    <div class="legend" id="srLegend"></div>
+  </div>
+  <div class="card">
+    <h2>月平均統計 <small>Monthly climatology &amp; extremes</small></h2>
+    <div class="scroll"><table id="srMonthly"></table></div>
+  </div>
+</section>
+
+<!-- ======== HOVMOLLER ======== -->
+<section class="page" id="p-hov">
+  <div class="card">
+    <h2>時間–緯度剖面 <small>Hovmöller diagram (time × latitude)</small></h2>
+    <p class="note">沿東西向平均後，以時間為橫軸、緯度為縱軸呈現。可清楚看出季節推移、暖水北抬時程與異常年份。</p>
+    <div class="ctl">
+      <div class="seg" id="hovMode"><button data-m="sst" class="on">實測 SST</button><button data-m="anom">距平 Anomaly</button></div>
+      <label>經度帶 Longitude band</label><select id="hovLon"></select>
+    </div>
+    <canvas id="hovCv" height="420"></canvas>
+    <div class="legend"><span id="hovMin"></span><canvas id="hovLg" width="260" height="12"></canvas><span id="hovMax"></span><span>°C</span></div>
+  </div>
+  <div class="card">
+    <h2>時間–經度剖面 <small>Hovmöller (time × longitude)</small></h2>
+    <p class="note">沿南北向平均，可觀察臺灣海峽↔太平洋之東西向溫度梯度變化。</p>
+    <canvas id="hovCv2" height="340"></canvas>
+  </div>
+</section>
+
+<!-- ======== MATRIX ======== -->
+<section class="page" id="p-matrix">
+  <div class="card">
+    <div class="ctl">
+      <label>海域 Region</label><select id="mxRegion"></select>
+    </div>
+    <h2>年 × 月 海溫距平矩陣 <small>Year × month SST anomaly (°C)</small></h2>
+    <p class="note">相對同質基期逐日氣候值之月平均距平。灰底表示該月無資料（&lt; 2 日）；淡化並標 <b>*</b> 者樣本少於 10 日，僅供參考。2018-11 ～ 2019-05 為舊色階世代，其值不可與其後各年直接比較。</p>
+    <div class="scroll"><table id="mxTable"></table></div>
+    <div class="legend"><span>-2 °C</span><canvas id="mxLg" width="220" height="12"></canvas><span>+2 °C</span></div>
+  </div>
+  <div class="card">
+    <h2>各海域月距平比較 <small>Cross-region monthly anomaly</small></h2>
+    <p class="note">以最近 36 個月為窗，比較各海域距平走勢。</p>
+    <canvas id="mxCv" height="330"></canvas>
+    <div class="legend" id="mxLegend"></div>
+  </div>
+</section>
+
+<!-- ======== MHW ======== -->
+<section class="page" id="p-mhw">
+  <div class="card">
+    <h2>海洋熱浪事件偵測 <small>Marine heatwave (MHW) detection</small></h2>
+    <p class="note">採 Hobday et al. (2016) 定義：日均海溫連續 5 日以上超過該日序之第 90 百分位門檻（間隔 ≤ 2 日併為同一事件）。
+      <b>注意</b>：氣候基期僅為 2019-06-03 起之同質期間（約 6.3 年，非 30 年標準基期），會高估事件頻率；
+      2019-06-02 以前之「舊色階世代」資料不參與偵測。指標僅適用於期間內相對比較。</p>
+    <div class="ctl"><label>海域 Region</label><select id="mhRegion"></select></div>
+    <div class="kpis" id="mhKpi"></div>
+    <canvas id="mhCv" height="330"></canvas>
+    <div class="legend"><span style="color:#ff7043">■</span> 超過門檻（熱浪）　<span style="color:#8ba6bd">■</span> 日均海溫　<span style="color:#66bb6a">■</span> 氣候值　<span style="color:#ffb300">■</span> P90 門檻</div>
+  </div>
+  <div class="card">
+    <h2>事件清單 <small>Event list</small></h2>
+    <div class="tblwrap"><table id="mhTable"></table></div>
+  </div>
+</section>
+
+<!-- ======== METHOD ======== -->
+<section class="page" id="p-method">
+  <div class="card meth">
+    <h2>方法、限制與品質管制 <small>Methodology, limitations &amp; QC</small></h2>
+
+    <h3>1. 資料來源 Data source</h3>
+    <ul>
+      <li>原始素材為農業部水產試驗所每日發布之「衛星海面水溫圖」PNG 影像（<code>domain-taiwan_*-JPL-L4_GHRSST-SSTfnd-MUR-GLOB-v02.0-fv04.1.nc_contour.png</code>），底層產品為 NASA JPL 之 <b>GHRSST MUR L4</b>（Multi-scale Ultra-high Resolution，1 km 融合分析場，基準深度海溫 SSTfnd）。早期年份另含 G1SST 系列圖檔。</li>
+      <li>本儀表板<b>不重新散布原始影像</b>；GitHub 上僅存放反演後之數值資料與程式碼。</li>
+    </ul>
+
+    <h3>2. 影像→溫度定量反演 Image-to-SST inversion</h3>
+    <ul>
+      <li>逐張影像自動偵測色階條（colorbar）位置，取其中位數色列建立 <code>RGB → 正規化位置</code> 查找表（LUT），以最近鄰配色（歐氏距離門檻 26）還原每個像素之數值位置。</li>
+      <li>逐張以虛線經緯格線之最小平方擬合建立像素↔經緯度轉換，再以每個 0.25° 網格內像素之<b>中位數</b>聚合。採中位數而非平均，可對等溫線、海岸線、地名文字等疊加物具強健性。</li>
+      <li>反演結果以等溫線疊合方式驗證：將反演場之等溫線（5 °C 間隔）重新繪製並與原圖紅色等溫線比對，兩者位置吻合。</li>
+    </ul>
+
+    <h3>3. 資料不連續之重要發現 <span class="pill hot">關鍵</span></h3>
+    <div class="warnbox">
+      <b>⚠ 2019-06-03 前後為兩個不同世代的圖檔產製流程，資料不可直接串接。</b>
+      <ul style="margin-top:8px">
+        <li>反演過程以「圖上紅色等溫線必為 5 的倍數」作為內部真值，逐張自動判定色階上限。判定結果在時間上<b>完全乾淨地一刀切開</b>：
+          2018-11-11 ～ 2019-06-02 共 204 日全數判為 <code>−2 ~ 30 °C</code>；2019-06-03 起 1,858 日全數判為 <code>−2 ~ 35 °C</code>。
+          自動判定率 <b>99.5 %</b>，無跨期混雜，可確認為一次性的產製流程變更，而非個別圖檔差異。</li>
+        <li>此變更並未反映在圖面標示上：兩個世代的檔名同為 G1SST 系列，圖面色標刻度亦未同步更新。
+          <b>若依圖面印製刻度判讀 2019-06-03 之後的圖檔，會低估海溫約 3 ~ 5 °C。</b></li>
+        <li>更關鍵的是，<b>換版當日域平均出現約 +0.5 °C 的單日跳動</b>（2019-06-02 為 26.78 °C、06-03 為 27.36 °C，而該時期正常升溫速率僅約 0.1 °C/日）；
+          以同質期間氣候值為基準，前段 204 日的平均距平為 <b>+0.56 °C</b>，且冷月偏高（1–2 月 約 +1.0 °C）、暖月偏低（5–6 月 約 −0.25 °C），
+          呈現季節振幅被壓縮的型態。此已非單純色階刻度問題，而是<b>底層資料或處理鏈本身的差異</b>。</li>
+        <li><b>本儀表板的處理方式</b>：氣候平均值、第 90 百分位門檻與所有海洋熱浪事件，一律<b>僅以 2019-06-03 之後的同質期間計算</b>；
+          前段 204 日仍完整保留可供瀏覽，但在所有時間序列圖上以<span style="color:#ffb300">黃底</span>標示為「舊色階世代」，且不納入基期、不參與熱浪偵測與趨勢迴歸。</li>
+      </ul>
+      此為本專案建置過程中發現、且以內部一致性檢定確認的資料品質問題，建議原始圖檔產製單位於後續歸檔時一併註記版本資訊。
+    </div>
+
+    <h3>4. 已知限制 Known limitations</h3>
+    <ul>
+      <li><b>色階量化誤差</b>：由連續調色盤反推，理論解析度約 ±0.15 °C；疊加物邊緣像素以中位數與飽和度濾除，但近岸窄水道格點仍可能受海岸線繪製影響。</li>
+      <li><b>上限截斷</b>：判定為 −2 ~ 35 °C 色階者，已將貼近上限之格點視為紅色等溫線污染剔除。前段 −2 ~ 30 °C 世代涵蓋 2018 年 11 月至 2019 年 6 月初（秋冬春），域內海溫未達 30 °C，故實際未發生上限截斷。</li>
+      <li><b>氣候基期過短</b>：基期為 2019-06-03 ～ 2025-10-01（約 6.3 年），遠短於 WMO 30 年標準與 Hobday et al. 建議之 30 年基期。
+        短基期會<b>低估</b>氣候值的變異範圍、<b>高估</b>熱浪事件頻率，且無法分離長期暖化訊號與年際變異。本站之 MHW 統計僅供期間內相對比較，不可直接與國際文獻對照。</li>
+      <li><b>趨勢不具氣候意義</b>：約 6 年的記錄長度遠不足以估計海溫長期趨勢；頁面所示線性斜率僅描述本期間的線性變化，受 ENSO 等年際變異主導。</li>
+      <li><b>時間覆蓋不均</b>：2024 年原始檔案庫僅存 5 日（2024-12-12 ～ 16）、2026 年僅存 7 日（2026-07-15 ～ 09-01），2025-10-02 至 2026-07-14 亦為空窗；其餘各年覆蓋率約 86 ~ 99 %。所有圖表採<b>真實日曆時間軸</b>，缺口如實留白，折線於缺漏超過 5 日處斷開。逐日氣候值以 ±7 日窗聚合並沿日序做 ±5 日圓形平滑以補足樣本。</li>
+      <li>本儀表板為<b>影像再分析視覺化工具</b>，非官方發布數值產品。需高精度應用請直接取用 JPL PO.DAAC 之 MUR L4 netCDF 原始資料。</li>
+    </ul>
+
+    <h3>5. 資料集規格 Dataset spec</h3>
+    <ul>
+      <li>期間：<span id="specPeriod">—</span>。</li>
+      <li>網格：經度 116–128 °E、緯度 18–32 °N，0.25° × 0.25°（48 × 56 = 2688 格），平均每日有效海洋格點約 2,090 格。</li>
+      <li>編碼：<code>uint8</code> 灰階 PNG 立方，<code>T = value × 0.15 °C</code>，<code>255 = 無資料</code>。瀏覽器端以 canvas 解碼。</li>
+      <li>檔案：<code>data/sst_cube.png</code>（逐日場）、<code>data/clim_cube.png</code>（365 日序氣候場）、<code>data/series.json</code>、<code>data/monthly.json</code>、<code>data/meta.json</code>。</li>
+    </ul>
+
+    <h3>6. 品質管制統計 QC summary</h3>
+    <div class="scroll"><table id="qcTable"></table></div>
+    <h3>7. 逐項品管結果 QC details</h3>
+    <div class="scroll" id="qcNotes"></div>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  臺灣周邊海域衛星遙測海面水溫時空分布儀表板　·　資料反演自農業部水產試驗所每日衛星海溫圖（GHRSST MUR L4 / JPL）<br>
+  資料集產製時間 <span id="genTime">—</span>　·　本站僅存放反演數值，未散布原始影像
+</footer>
+
+<script src="js/app.js"></script>
+</body>
+</html>
