@@ -344,10 +344,12 @@ function j(u) { return fetch(u).then(function (r) { return r.json(); }); }
 Promise.all([j('data/meta.json'), j('data/series.json'), j('data/monthly.json'),
   loadPNG('data/sst_cube.png'), loadPNG('data/clim_cube.png'),
   fetch('data/qc.json').then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
-  loadPNG('data/land_mask.png').catch(function () { return null; })
+  loadPNG('data/land_mask.png').catch(function () { return null; }),
+  fetch('data/insitu.json').then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; })
 ]).then(function (r) {
   M = r[0]; SER = r[1]; MON = r[2]; SST = r[3].data; CLIM = r[4].data; QC = r[5];
   if (r[6]) LANDCV = buildLand(r[6].data, r[6].w, r[6].h);
+  IS = r[7];
   NLON = M.grid.nlon; NLAT = M.grid.nlat; NC = NLON * NLAT;
   SCALE = M.scale; NODATA = M.nodata; ND = M.dates.length; NLEG = M.legacy_n || 0;
   DOY = new Int16Array(ND); YEAR = new Int16Array(ND); MONTHI = new Int8Array(ND);
@@ -440,6 +442,33 @@ function init() {
   hl.onchange = drawHov;
 
   drawLegendBar(document.getElementById('mxLg'), function (t) { return ramp(ANO_STOPS, t); });
+
+  if (IS) {
+    var seaOpts = IS.meta.seasons.filter(function (s) { return s.tp !== 17 && s.tp !== 18; });
+    [['vaMapSea', '15'], ['vtSea', '15']].forEach(function (cfg) {
+      var el = document.getElementById(cfg[0]);
+      seaOpts.forEach(function (s) { el.appendChild(new Option(s.name, s.tp)); });
+      el.value = cfg[1];
+    });
+    var cu = document.getElementById('cuSea');
+    [0, 13, 14, 15, 16].forEach(function (tp) {
+      var nm = IS.meta.seasons.filter(function (s) { return s.tp === tp; })[0].name;
+      cu.appendChild(new Option(nm, tp));
+    });
+    cu.value = '0';
+    document.getElementById('vaMapSea').onchange = drawBiasMap;
+    document.getElementById('vtSea').onchange = drawVert;
+    cu.onchange = drawCurrents;
+    document.getElementById('cuAxis').onclick = function () { this.classList.toggle('on'); drawCurrents(); };
+    document.getElementById('cuSST').onclick = function () { this.classList.toggle('on'); drawCurrents(); };
+    segBind('vaScMode', drawScatter);
+    segBind('vtField', drawVert);
+  } else {
+    ['valid', 'vert'].forEach(function (p) {
+      var b = document.querySelector('nav.tabs button[data-p="' + p + '"]');
+      if (b) b.style.display = 'none';
+    });
+  }
   window.addEventListener('resize', debounce(function () {
     var on = document.querySelector('nav.tabs button.on');
     render(on.dataset.p);
@@ -465,6 +494,8 @@ function render(p) {
   else if (p === 'hov') drawHov();
   else if (p === 'matrix') drawMatrix();
   else if (p === 'mhw') drawMHW();
+  else if (p === 'valid') drawValid();
+  else if (p === 'vert') { drawVert(); drawCurrents(); }
   else if (p === 'method') drawQC();
 }
 
@@ -959,4 +990,258 @@ function drawQC() {
   d.innerHTML = '<table>' + rows.map(function (r) {
     return '<tr><td style="width:190px;color:#8ba6bd">' + r[0] + '</td><td>' + r[1] + '</td></tr>';
   }).join('') + '</table>';
+}
+
+/* =================== 現場觀測整合 (CTD / SADCP 15 弧分氣候圖集) =================== */
+var IS = null;                       // insitu.json
+var VT_INFO = {
+  mld: ['混合層深度 (m)', '溫度較 10 m 低 0.5 °C 之深度。淺＝表層熱量被侷限在薄層內，升溫快、對表面擾動敏感；深＝熱量向下混合，表水溫變化遲鈍。', 'm', true],
+  dT:  ['層化強度 ΔT(10–100 m) (°C)', '10 m 與 100 m 之溫差。值大代表溫躍層強、上下水體交換受阻。', '°C', false],
+  swi: ['表層增溫指標 SWI (°C)', '10 m 溫度減去 0–100 m 平均溫度。值大代表熱量集中於表層，衛星看到的高溫「不深」。', '°C', false],
+  t10: ['CTD 10 m 溫度 (°C)', '圖集之現場實測 10 dbar 溫度氣候平均。', '°C', false]
+};
+var GRAD_SEQ = [[0.00,12,24,92],[0.2,20,82,178],[0.42,32,150,200],[0.6,150,214,110],[0.78,238,220,80],[0.9,246,160,48],[1,190,50,35]];
+
+function isGrid() { return { lon: IS.meta.glon, lat: IS.meta.glat }; }
+
+/* 圖集網格之場繪製：格點落在 0.25° 交點，故影像需外推半格以正確套疊 */
+function drawAtlas(cv, arr, colf, opt) {
+  opt = opt || {};
+  var g0 = isGrid(), NX = g0.lon.length, NY = g0.lat.length;
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+  var ASPECT = (NLAT / NLON) / Math.cos(25 * Math.PI / 180);
+  var W = cv.parentNode.clientWidth || 640, H = W * ASPECT;
+  var maxH = opt.maxH || 620;
+  if (H > maxH) { H = maxH; W = H / ASPECT; }
+  W = Math.round(W); H = Math.round(H);
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  cv.style.width = W + 'px'; cv.style.height = H + 'px'; cv.style.margin = '0 auto';
+  var g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = '#0a1219'; g.fillRect(0, 0, W, H);
+
+  if (arr) {
+    var im = new ImageData(NX, NY), d = im.data;
+    for (var j = 0; j < NY; j++) for (var i = 0; i < NX; i++) {
+      var v = arr[NY - 1 - j][i], o = (j * NX + i) * 4;   // 陣列緯度由南而北，影像由北而南
+      if (v === null || v === undefined) { d[o + 3] = 0; continue; }
+      var c = colf(v);
+      d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255;
+    }
+    var off = document.createElement('canvas'); off.width = NX; off.height = NY;
+    off.getContext('2d').putImageData(im, 0, 0);
+    // 半格外推：資料涵蓋 115.875–128.125 / 17.875–32.125
+    var sx = W / 12, sy = H / 14;
+    g.imageSmoothingEnabled = opt.smooth !== false; g.imageSmoothingQuality = 'high';
+    g.drawImage(off, -0.125 * sx, -0.125 * sy, 12.25 * sx, 14.25 * sy);
+  }
+  if (LANDCV) { g.imageSmoothingEnabled = true; g.drawImage(LANDCV, 0, 0, W, H); }
+
+  g.save();
+  g.strokeStyle = 'rgba(255,255,255,.14)'; g.lineWidth = 1; g.font = '10px monospace';
+  g.shadowColor = 'rgba(0,0,0,.85)'; g.shadowBlur = 3; g.fillStyle = 'rgba(255,255,255,.9)';
+  for (var lon = 118; lon <= 126; lon += 2) {
+    var x = (lon - 116) / 12 * W;
+    g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke();
+    g.textAlign = 'left'; g.textBaseline = 'bottom'; g.fillText(lon + '°E', x + 3, H - 3);
+  }
+  for (var lat = 20; lat <= 30; lat += 2) {
+    var y = (32 - lat) / 14 * H;
+    g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke();
+    g.textAlign = 'left'; g.textBaseline = 'bottom'; g.fillText(lat + '°N', 3, y - 2);
+  }
+  g.restore();
+  g.strokeStyle = 'rgba(139,166,189,.45)'; g.lineWidth = 1; g.strokeRect(0.5, 0.5, W - 1, H - 1);
+  return { g: g, W: W, H: H };
+}
+
+function arrRange(arr, plo, phi) {
+  var v = [];
+  for (var j = 0; j < arr.length; j++) for (var i = 0; i < arr[j].length; i++)
+    if (arr[j][i] !== null && arr[j][i] !== undefined) v.push(arr[j][i]);
+  if (!v.length) return [0, 1];
+  v.sort(function (a, b) { return a - b; });
+  var q = function (p) { return v[Math.min(v.length - 1, Math.max(0, Math.round(p * (v.length - 1))))]; };
+  return [q(plo === undefined ? 0.02 : plo), q(phi === undefined ? 0.98 : phi)];
+}
+
+/* ---------- 分頁：現場驗證 ---------- */
+function drawValid() {
+  if (!IS) return;
+  var S = IS.meta.seasons, byTp = {};
+  S.forEach(function (r) { byTp[r.tp] = r; });
+  document.getElementById('vaBase').textContent = IS.meta.baseline[0] + ' ～ ' + IS.meta.baseline[1];
+
+  var w = byTp[13], su = byTp[15], an = byTp[0];
+  var k = [
+    ['冬季偏差 DJF bias', sgn(w.bias) + ' °C', 'RMSE ' + fmt(w.rmse) + '　R = ' + w.r.toFixed(3), Math.abs(w.bias) < 0.2 ? 'acc' : 'warm'],
+    ['夏季偏差 JJA bias', sgn(su.bias) + ' °C', 'RMSE ' + fmt(su.rmse) + '　R = ' + su.r.toFixed(3), 'warm'],
+    ['冬季混合層 DJF MLD', fmt(w.mld, 0) + ' m', '層化 ΔT ' + fmt(w.dT) + ' °C（弱）', 'cool'],
+    ['夏季混合層 JJA MLD', fmt(su.mld, 0) + ' m', '層化 ΔT ' + fmt(su.dT) + ' °C（強）', 'warm'],
+    ['比對格點數', an.n.toLocaleString(), '0.25° 圖集格點（年平均）', 'acc'],
+    ['CTD 資料列', IS.meta.nctd.toLocaleString(), '15 弧分網格氣候圖集', 'acc'],
+    ['SADCP 資料列', IS.meta.nadcp.toLocaleString(), '0–500 m 流速剖面', 'acc']
+  ];
+  document.getElementById('vaKpi').innerHTML = k.map(function (x) {
+    return '<div class="kpi ' + x[3] + '"><div class="lab">' + x[0] + '</div><div class="val">' + x[1] + '</div><div class="sub">' + x[2] + '</div></div>';
+  }).join('');
+
+  var t = '<thead><tr><th>期間 Period</th><th>格點數 n</th><th>偏差 bias (°C)</th><th>RMSE (°C)</th>'
+        + '<th>中位偏差</th><th>標準差 SD</th><th>相關 R</th><th>MLD 中位 (m)</th><th>ΔT 中位 (°C)</th><th>衛星日數</th></tr></thead><tbody>';
+  S.forEach(function (r) {
+    var hot = Math.abs(r.bias) >= 0.4;
+    t += '<tr><td>' + r.name + '</td><td class="mono">' + r.n + '</td>'
+      + '<td class="mono" style="color:' + (hot ? '#ff7043' : '#66bb6a') + '">' + sgn(r.bias) + '</td>'
+      + '<td class="mono">' + fmt(r.rmse) + '</td><td class="mono">' + sgn(r.median) + '</td>'
+      + '<td class="mono">' + fmt(r.sd) + '</td><td class="mono">' + r.r.toFixed(3) + '</td>'
+      + '<td class="mono">' + fmt(r.mld, 0) + '</td><td class="mono">' + fmt(r.dT) + '</td>'
+      + '<td class="mono">' + r.satdays + '</td></tr>';
+  });
+  document.getElementById('vaTable').innerHTML = t + '</tbody>';
+
+  drawScatter(); drawBinned(); drawBiasMap();
+}
+
+function drawScatter() {
+  var tp = segVal('vaScMode'), pts = IS.scatter[tp] || [];
+  var P = prep(document.getElementById('vaScCv'), 360);
+  var x0 = 46, y0 = 12, w = P.w - 60, h = P.h - 44;
+  var all = [];
+  pts.forEach(function (p) { all.push(p[0]); all.push(p[1]); });
+  var lo = Math.floor(Math.min.apply(null, all) - 0.5), hi = Math.ceil(Math.max.apply(null, all) + 0.5);
+  var tk = niceTicks(lo, hi, 6);
+  axes(P.g, x0, y0, w, h, tk, tk);
+  var X = function (v) { return x0 + (v - lo) / (hi - lo) * w; };
+  var Y = function (v) { return y0 + h - (v - lo) / (hi - lo) * h; };
+  polyline(P.g, [[X(lo), Y(lo)], [X(hi), Y(hi)]], 'rgba(139,166,189,.6)', 1.2, [5, 4]);
+  P.g.fillStyle = 'rgba(79,195,247,.55)';
+  pts.forEach(function (p) {
+    P.g.beginPath(); P.g.arc(X(p[0]), Y(p[1]), 2.2, 0, 7); P.g.fill();
+  });
+  P.g.fillStyle = '#8ba6bd'; P.g.font = '11px sans-serif';
+  P.g.textAlign = 'center'; P.g.fillText('CTD 10 m (°C)', x0 + w / 2, y0 + h + 24);
+  P.g.save(); P.g.translate(12, y0 + h / 2); P.g.rotate(-Math.PI / 2);
+  P.g.fillText('衛星反演 SST (°C)', 0, 0); P.g.restore();
+  var r = IS.meta.seasons.filter(function (s) { return String(s.tp) === String(tp); })[0];
+  P.g.textAlign = 'left'; P.g.fillStyle = '#e8f1f8';
+  P.g.fillText('n=' + r.n + '　bias ' + sgn(r.bias) + '　RMSE ' + fmt(r.rmse) + '　R ' + r.r.toFixed(3), x0 + 8, y0 + 14);
+}
+
+function drawBinned() {
+  var P = prep(document.getElementById('vaBinCv'), 300);
+  var x0 = 52, y0 = 14, w = P.w - 70, h = P.h - 52;
+  var byTp = {}; IS.meta.seasons.forEach(function (r) { byTp[r.tp] = r; });
+  var W13 = byTp[13].binned, W15 = byTp[15].binned;
+  var vals = W13.concat(W15).map(function (b) { return b.bias; }).filter(function (v) { return v !== null; });
+  var hi = Math.max(1.2, Math.ceil(Math.max.apply(null, vals) * 10) / 10 + 0.1);
+  var lo = Math.min(-0.4, Math.floor(Math.min.apply(null, vals) * 10) / 10 - 0.1);
+  var n = W15.length;
+  var xt = W15.map(function (b, i) { return { t: (i + 0.5) / n, l: b.lab + ' m', grid: false }; });
+  axes(P.g, x0, y0, w, h, xt, niceTicks(lo, hi, 6));
+  var zy = y0 + h - (0 - lo) / (hi - lo) * h;
+  P.g.strokeStyle = '#40607e'; P.g.beginPath(); P.g.moveTo(x0, zy); P.g.lineTo(x0 + w, zy); P.g.stroke();
+  var bw = w / n * 0.34;
+  [[W13, '#4fc3f7', -1], [W15, '#ff7043', 1]].forEach(function (S) {
+    S[0].forEach(function (b, i) {
+      if (b.bias === null) return;
+      var cx = x0 + (i + 0.5) / n * w + S[2] * bw * 0.55;
+      var y = y0 + h - (b.bias - lo) / (hi - lo) * h;
+      P.g.fillStyle = S[1];
+      P.g.fillRect(cx - bw / 2, Math.min(y, zy), bw, Math.abs(zy - y));
+      P.g.fillStyle = '#8ba6bd'; P.g.font = '10px monospace'; P.g.textAlign = 'center';
+      P.g.fillText(b.n, cx, (b.bias >= 0 ? y - 4 : y + 12));
+    });
+  });
+  P.g.fillStyle = '#8ba6bd'; P.g.font = '11px sans-serif'; P.g.textAlign = 'left';
+  P.g.fillText('偏差 (°C)', 6, y0 + 4);
+}
+
+function drawBiasMap() {
+  var sel = document.getElementById('vaMapSea');
+  var tp = sel.value || '15';
+  var arr = IS.fields[tp].bias;
+  drawAtlas(document.getElementById('vaMapCv'), arr,
+    function (v) { return anoColor(v, 2); }, { smooth: false, maxH: 420 });
+  drawLegendBar(document.getElementById('vaMapLg'), function (t) { return ramp(ANO_STOPS, t); });
+}
+
+/* ---------- 分頁：垂直結構與海流 ---------- */
+function drawVert() {
+  if (!IS) return;
+  var tp = document.getElementById('vtSea').value || '15';
+  var f = segVal('vtField');
+  var arr = IS.fields[tp][f], info = VT_INFO[f];
+  var rg = arrRange(arr, 0.03, 0.97);
+  var inv = info[3];                     // MLD：淺為暖色（風險高）
+  var colf = function (v) {
+    var t = (v - rg[0]) / (rg[1] - rg[0]);
+    return ramp(GRAD_SEQ, inv ? 1 - t : t);
+  };
+  drawAtlas(document.getElementById('vtMapCv'), arr, colf, { smooth: false, maxH: 560 });
+  drawLegendBar(document.getElementById('vtLg'), function (t) { return ramp(GRAD_SEQ, inv ? 1 - t : t); });
+  document.getElementById('vtLo').textContent = fmt(rg[0], f === 'mld' ? 0 : 1);
+  document.getElementById('vtHi').textContent = fmt(rg[1], f === 'mld' ? 0 : 1);
+  document.getElementById('vtUnit').textContent = info[2];
+  document.getElementById('vtNote').innerHTML = '<b>' + info[0] + '</b><br>' + info[1];
+
+  var v = [];
+  for (var j = 0; j < arr.length; j++) for (var i = 0; i < arr[j].length; i++)
+    if (arr[j][i] !== null) v.push(arr[j][i]);
+  v.sort(function (a, b) { return a - b; });
+  var q = function (p) { return v[Math.round(p * (v.length - 1))]; };
+  var dec = f === 'mld' ? 0 : 2;
+  var rows = [['有效格點', v.length], ['最小值', fmt(q(0), dec)], ['10 百分位', fmt(q(0.1), dec)],
+              ['中位數', fmt(q(0.5), dec)], ['90 百分位', fmt(q(0.9), dec)], ['最大值', fmt(q(1), dec)]];
+  document.getElementById('vtStats').innerHTML = rows.map(function (r) {
+    return '<tr><td>' + r[0] + '</td><td class="mono">' + r[1] + '</td></tr>';
+  }).join('');
+}
+
+function drawCurrents() {
+  var tp = document.getElementById('cuSea').value || '0';
+  var C0 = IS.cur[tp], ax = IS.axis[tp] || [];
+  var showAxis = document.getElementById('cuAxis').classList.contains('on');
+  var showSST = document.getElementById('cuSST').classList.contains('on');
+  var base = null, rg = null;
+  if (showSST) {
+    base = IS.fields[tp].sat || IS.fields[tp].t10; rg = arrRange(base, 0.02, 0.98);
+  }
+  var R = drawAtlas(document.getElementById('cuMapCv'), base,
+    base ? function (v) { return ramp(SST_STOPS, (v - rg[0]) / (rg[1] - rg[0])); } : null,
+    { smooth: true, maxH: 560 });
+  var g = R.g, W = R.W, H = R.H, G = isGrid();
+  var X = function (lon) { return (lon - 116) / 12 * W; };
+  var Y = function (lat) { return (32 - lat) / 14 * H; };
+
+  var step = W < 420 ? 3 : 2, sc = Math.min(W / 12, 60) * 0.55;
+  g.save(); g.lineWidth = 1.1; g.strokeStyle = 'rgba(232,241,248,.88)'; g.fillStyle = 'rgba(232,241,248,.88)';
+  for (var j = 0; j < G.lat.length; j += step) for (var i = 0; i < G.lon.length; i += step) {
+    var u = C0.u[j][i], v = C0.v[j][i];
+    if (u === null || v === null) continue;
+    var sp = Math.hypot(u, v); if (sp < 0.02) continue;
+    var x = X(G.lon[i]), y = Y(G.lat[j]);
+    var dx = u * sc, dy = -v * sc;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + dx, y + dy); g.stroke();
+    var a = Math.atan2(dy, dx), hl = Math.min(4.5, 2 + sp * 4);
+    g.beginPath(); g.moveTo(x + dx, y + dy);
+    g.lineTo(x + dx - hl * Math.cos(a - 0.4), y + dy - hl * Math.sin(a - 0.4));
+    g.lineTo(x + dx - hl * Math.cos(a + 0.4), y + dy - hl * Math.sin(a + 0.4));
+    g.closePath(); g.fill();
+  }
+  g.restore();
+
+  if (showAxis && ax.length) {
+    polyline(g, ax.map(function (a) { return [X(a.lon), Y(a.lat)]; }), '#ffb300', 2.4);
+    g.fillStyle = '#ffb300';
+    ax.forEach(function (a) { g.beginPath(); g.arc(X(a.lon), Y(a.lat), 2.6, 0, 7); g.fill(); });
+  }
+
+  var t = '<thead><tr><th>緯度</th><th>軸心經度</th><th>北向流 v (m/s)</th><th>流速 |V|</th><th>軸心 SST</th><th>西側 1° SST</th><th>ΔSST</th></tr></thead><tbody>';
+  ax.forEach(function (a) {
+    var d = (a.sst !== null && a.sstW !== null) ? a.sst - a.sstW : null;
+    t += '<tr><td class="mono">' + a.lat.toFixed(2) + '°N</td><td class="mono">' + a.lon.toFixed(2) + '°E</td>'
+      + '<td class="mono">' + fmt(a.v, 3) + '</td><td class="mono">' + fmt(a.spd, 3) + '</td>'
+      + '<td class="mono">' + fmt(a.sst) + '</td><td class="mono">' + fmt(a.sstW) + '</td>'
+      + '<td class="mono" style="color:' + (d > 0 ? '#ff7043' : '#42a5f5') + '">' + (d === null ? '—' : sgn(d)) + '</td></tr>';
+  });
+  document.getElementById('cuTable').innerHTML = t + '</tbody>';
 }
