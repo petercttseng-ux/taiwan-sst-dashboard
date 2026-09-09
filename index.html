@@ -30,6 +30,8 @@
     <button data-p="hov">時緯剖面 Hovmöller</button>
     <button data-p="matrix">年月距平 Anomaly Matrix</button>
     <button data-p="mhw">海洋熱浪 Marine Heatwave</button>
+    <button data-p="valid">現場驗證 In-situ</button>
+    <button data-p="vert">垂直結構與海流 Vertical &amp; Currents</button>
     <button data-p="method">方法與品管 Method / QC</button>
   </nav>
 </div>
@@ -180,6 +182,86 @@
   </div>
 </section>
 
+
+<!-- ======== IN-SITU VALIDATION ======== -->
+<section class="page" id="p-valid">
+  <div class="kpis" id="vaKpi"></div>
+
+  <div class="card">
+    <h2>衛星反演 SST 與 CTD 10 m 實測溫度之比對 <small>Satellite SST vs CTD 10 m climatology</small></h2>
+    <p class="note">兩者皆為<b>氣候平均場</b>且落在同一 0.25° 網格：衛星取同質期間（<span id="vaBase">—</span>）之季節平均，
+      以雙線性內插至圖集格點；CTD 取 15 弧分網格氣候圖集之 10 dbar 溫度。偏差定義為 <b>衛星 − CTD</b>。</p>
+    <div class="scroll"><table id="vaTable"></table></div>
+  </div>
+
+  <div class="mapgrid">
+    <div class="card" style="margin:0">
+      <h2>散布比對 <small>Scatter</small></h2>
+      <div class="ctl"><div class="seg" id="vaScMode">
+        <button data-m="13" class="on">冬 DJF</button><button data-m="15">夏 JJA</button><button data-m="0">年平均</button>
+      </div></div>
+      <canvas id="vaScCv" height="360"></canvas>
+      <div class="legend">灰虛線為 1:1 線。點為圖集格點（每季最多繪 900 點）。</div>
+    </div>
+    <div class="card" style="margin:0">
+      <h2>偏差空間分布 <small>Bias map</small></h2>
+      <div class="ctl"><select id="vaMapSea"></select></div>
+      <canvas id="vaMapCv"></canvas>
+      <div class="legend"><span>-2</span><canvas id="vaMapLg" width="180" height="12"></canvas><span>+2 °C</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>偏差隨混合層深度之變化 <small>Bias vs mixed-layer depth</small> <span class="pill hot">關鍵</span></h2>
+    <p class="note">若偏差僅來自年代差異（圖集為歷年累積、衛星為 2019 年後），應與當地混合層深度無關。實際結果並非如此。</p>
+    <canvas id="vaBinCv" height="300"></canvas>
+    <div class="legend"><span style="color:#4fc3f7">■</span> 冬 DJF　<span style="color:#ff7043">■</span> 夏 JJA　　橫軸為混合層深度分組，柱上數字為樣本數</div>
+  </div>
+</section>
+
+<!-- ======== VERTICAL & CURRENTS ======== -->
+<section class="page" id="p-vert">
+  <div class="card">
+    <div class="ctl">
+      <label>季節 Season</label><select id="vtSea"></select>
+      <div class="seg" id="vtField">
+        <button data-m="mld" class="on">混合層深度 MLD</button>
+        <button data-m="dT">層化 ΔT(10–100 m)</button>
+        <button data-m="swi">表層增溫指標 SWI</button>
+        <button data-m="t10">CTD 10 m 溫度</button>
+      </div>
+    </div>
+    <div class="mapgrid">
+      <div>
+        <canvas id="vtMapCv"></canvas>
+        <div class="legend"><span id="vtLo"></span><canvas id="vtLg" width="220" height="12"></canvas><span id="vtHi"></span><span id="vtUnit"></span></div>
+      </div>
+      <div class="card" style="margin:0">
+        <h2 style="font-size:14px">說明 <small>What it shows</small></h2>
+        <p class="note" id="vtNote"></p>
+        <table id="vtStats"></table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>0–100 m 平均流場與黑潮軸 <small>Depth-averaged current &amp; Kuroshio axis</small></h2>
+    <p class="note">箭頭為船載都卜勒流剖儀（SADCP）0–100 m 深度平均流；黃線為逐緯度北向流最大之位置，即黑潮流軸。</p>
+    <div class="ctl"><select id="cuSea"></select>
+      <button class="btn on" id="cuAxis">顯示流軸</button>
+      <button class="btn on" id="cuSST">底圖：衛星 SST 季節平均</button></div>
+    <div class="mapgrid">
+      <div><canvas id="cuMapCv"></canvas>
+        <div class="legend">底圖為衛星反演 SST 之季節平均；箭頭長度 ∝ 流速；<span style="color:#ffb300">━</span> 黑潮軸</div></div>
+      <div class="card" style="margin:0">
+        <h2 style="font-size:14px">黑潮軸與跨流溫差 <small>Axis &amp; cross-stream ΔSST</small></h2>
+        <p class="note">ΔSST＝流軸處衛星 SST 減去其西側 1° 經度處之 SST，量化黑潮暖舌相對陸棚水之強度。</p>
+        <div class="tblwrap"><table id="cuTable"></table></div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ======== METHOD ======== -->
 <section class="page" id="p-method">
   <div class="card meth">
@@ -188,6 +270,7 @@
     <h3>1. 資料來源 Data source</h3>
     <ul>
       <li>原始素材為農業部水產試驗所每日發布之「衛星海面水溫圖」PNG 影像（<code>domain-taiwan_*-JPL-L4_GHRSST-SSTfnd-MUR-GLOB-v02.0-fv04.1.nc_contour.png</code>），底層產品為 NASA JPL 之 <b>GHRSST MUR L4</b>（Multi-scale Ultra-high Resolution，1 km 融合分析場，基準深度海溫 SSTfnd）。早期年份另含 G1SST 系列圖檔。</li>
+      <li>現場觀測為 CTD 與船載 ADCP 之 <b>15 弧分網格氣候圖集</b>（<code>ctd_grid15moa</code>／<code>sadcp_grid15moa</code>），為已網格化、含平均與標準差之統計產品，非個別航次原始測值。</li>
       <li>本儀表板<b>不重新散布原始影像</b>；GitHub 上僅存放反演後之數值資料與程式碼。</li>
     </ul>
 
@@ -237,7 +320,60 @@
 
     <h3>6. 品質管制統計 QC summary</h3>
     <div class="scroll"><table id="qcTable"></table></div>
-    <h3>7. 逐項品管結果 QC details</h3>
+
+    <h3>8. 現場觀測整合 CTD / SADCP integration <span class="pill hot">新增</span></h3>
+    <ul>
+      <li><b>資料</b>：CTD 與船載都卜勒流剖儀（SADCP）之 <b>15 弧分（0.25°）網格氣候圖集</b>，欄位含逐層溫、鹽、σt 與 u、v 之平均及標準差，
+        時段碼為年平均、四季（DJF/MAM/JJA/SON）與東北／西南季風期。CTD 127,919 列（0–5,600 dbar）、SADCP 473,410 列（10–500 m）。</li>
+      <li><b>網格對位</b>：圖集格點落在 0.25° 整數交點，本專案衛星網格則以格心定義，兩者相差半格。比對時將衛星季節平均場<b>雙線性內插</b>至圖集格點，
+        避免半格位移造成的假性偏差。</li>
+      <li><b>可比性</b>：兩者皆為<b>氣候平均場</b>，因此比對的是氣候態而非逐日同步觀測；衛星取同質期間（2019-06-03 起）之季節平均，圖集則為歷年累積。</li>
+      <li><b>診斷量</b>：混合層深度 MLD（自 10 dbar 向下、溫度低於 10 m 值 0.5 °C 之深度）、層化 ΔT(10–100 m)、
+        表層增溫指標 SWI（10 m 溫度減 0–100 m 平均溫）、0–100 m 深度平均流與黑潮軸（逐緯度北向流最大位置）。</li>
+    </ul>
+
+    <h3>9. 綜合分析主要發現 Key findings <span class="pill hot">關鍵</span></h3>
+    <div class="warnbox" style="background:#0f2a40;border-color:#245a86">
+      <b style="color:#90caf9">① 冬季反演精度極佳，可作為管線正確性的獨立佐證。</b><br>
+      冬季（DJF）衛星反演 SST 與 CTD 10 m 氣候值之偏差僅 <b>+0.03 °C</b>，RMSE 0.83 °C，相關係數 <b>R = 0.941</b>（n = 170）。
+      這是完全獨立於影像反演流程之外的驗證：色階自我校正、幾何定位與網格聚合若有系統性錯誤，不可能同時通過此檢定。
+    </div>
+    <div class="warnbox">
+      <b>② 夏季 +0.76 °C 的偏差來自海洋層化，而非年代差異。</b><br>
+      偏差有明顯季節性：冬 +0.03、春 +0.07、<b>夏 +0.76</b>、秋 +0.48 °C。若偏差源自「圖集為歷年累積、衛星為近年」的暖化年代差，
+      應在各季大致一致，且與當地水文無關。實際檢定結果相反 ——<b>夏季偏差隨混合層深度單調遞減</b>：
+      MLD &lt; 20 m 者 +1.02 °C、20–30 m +0.62 °C、30–45 m +0.59 °C、&gt; 45 m +0.38 °C（n = 392）；
+      而冬季同樣分組則無此梯度（+0.09 / +0.40 / +0.08 / −0.01 °C）。
+      混合層淺、層化強時，衛星所感測之表層溫度高於 10 m 實測值；水體充分混合時兩者一致。
+      此梯度跨度達 <b>0.64 °C</b>，無法以年代差解釋。
+      <br><br>
+      <b>實務意涵</b>：夏季以衛星 SST 推估 10 m 以深之水溫時，於層化海域應扣除約 0.6–1.0 °C；冬季則可直接引用。
+    </div>
+    <div class="warnbox" style="background:#12261a;border-color:#2c5c3a">
+      <b style="color:#a5d6a7">③ 夏季高溫「不深」：表層增溫指標的季節反差。</b><br>
+      10 m 溫度與 0–100 m 平均溫之差（SWI）中位數為<b>夏季 2.69 °C、冬季 0.56 °C</b>，夏季混合層中位僅 22 m（冬季 57 m）。
+      這代表夏季海洋熱浪的訊號主要被侷限在最上層數十公尺內。評估熱浪對箱網養殖、底棲或深水漁場的影響時，
+      不宜直接以表層距平推論整個水體 —— 本儀表板「海洋熱浪」分頁之指標皆為<b>表層</b>指標。
+    </div>
+    <div class="warnbox" style="background:#2a1030;border-color:#5c2c6b">
+      <b style="color:#ce93d8">④ 黑潮軸位置與衛星熱鋒面一致，且跨流溫差具強烈季節性。</b><br>
+      SADCP 0–100 m 平均流所定義之黑潮軸，自臺灣東南方 121.25°E 沿岸北上，於 24–25.5°N 逐漸外移至 122–123.25°E，
+      約 25.5–26°N 轉向東行，核心流速 0.7–1.0 m/s。此軸線位置與衛星 SST 之暖／冷水界線在空間上吻合。
+      軸心與其西側 1° 經度處之 SST 差（ΔSST）：<b>冬季平均 +1.04 °C（最大 +2.95 °C）、夏季僅 +0.34 °C（最大 +1.13 °C）</b>。
+      冬季陸棚水受東北季風強烈降溫，黑潮暖舌因而在衛星影像上輪廓分明；夏季全域皆暖，熱對比幾乎消失 ——
+      這說明<b>以 SST 影像追蹤黑潮鋒面的可行性本身具有強烈季節性</b>，夏季須改用流速或鹽度等其他判據。
+    </div>
+
+    <h3>10. 現場觀測整合之限制 Caveats</h3>
+    <ul>
+      <li><b>非同步比對</b>：兩者皆為氣候平均，本節結果描述的是<b>氣候態的一致性</b>，不等同於逐日反演精度。逐日精度需以同步的現場觀測（如浮標、航次即時資料）另行驗證。</li>
+      <li><b>年代差異未分離</b>：圖集累積年代早於衛星期間，②之論證僅排除年代差為<b>主要</b>成因，未能完全定量分離；殘餘的年代訊號可能貢獻夏季偏差中的一部分。</li>
+      <li><b>取樣不均</b>：圖集格點來自歷年航次，空間覆蓋不均（域內 2,688 格中約 600 格有年平均 CTD 資料，冬季僅 170 格）；高緯與外海格點樣本偏少。</li>
+      <li><b>MLD 判準</b>：採 ΔT = 0.5 °C 之溫度判準，於鹽度主導層化之近岸與河口海域可能高估混合層深度。</li>
+      <li><b>黑潮軸</b>：以 0–100 m 平均北向流最大值定義，於流軸分歧或有中尺度渦擾動之緯度（如 25.75–26.5°N）判定較不穩定。</li>
+    </ul>
+
+    <h3>11. 逐項品管結果 QC details</h3>
     <div class="scroll" id="qcNotes"></div>
   </div>
 </section>
